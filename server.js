@@ -7,45 +7,70 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 정적 파일 제공 (index.html 포함)
-app.use(express.static(__dirname));
+// 이미지 폴더 경로
+const UNCLASSIFIED_DIR = path.join(__dirname, "images", "unclassified");
+const CLASSIFIED_DIR = path.join(__dirname, "images", "classified");
 
-// 이미지 목록 불러오기 API
-app.get("/images", (req, res) => {
-    const folder = path.join(__dirname, "unclassified");
+// 이미지 제공 라우트
+app.get("/images/:filename", (req, res) => {
+  const filename = String(req.params.filename); // 숫자가 들어와도 문자열로 변환
+  const filePath = path.join(UNCLASSIFIED_DIR, filename);
 
-    fs.readdir(folder, (err, files) => {
-        if (err) return res.status(500).json({ error: "폴더 읽기 실패" });
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("Image not found");
+  }
 
-        // 이미지 파일만 필터링
-        const imageFiles = files.filter(f =>
-            f.endsWith(".jpg") || f.endsWith(".png") || f.endsWith(".jpeg")
-        );
-
-        res.json(imageFiles);
-    });
+  res.sendFile(filePath);
 });
 
-// 이미지 이동 API
+// 무작위 이미지 하나 반환
+app.get("/random", (req, res) => {
+  const files = fs.readdirSync(UNCLASSIFIED_DIR).filter(f => {
+    return f.toLowerCase().endsWith(".jpg") || f.toLowerCase().endsWith(".png");
+  });
+
+  if (files.length === 0) {
+    return res.status(404).send("No images left");
+  }
+
+  const random = files[Math.floor(Math.random() * files.length)];
+
+  res.json({
+    filename: random,
+    url: `/images/${random}`
+  });
+});
+
+// 분류 요청 → 이미지 이동
 app.post("/move", (req, res) => {
-    const { filename, label } = req.body;
+  const { filename, category } = req.body;
 
-    const src = path.join(__dirname, "unclassified", filename);
-    const destFolder = path.join(__dirname, "classified", label);
+  if (!filename || !category) {
+    return res.status(400).send("filename and category are required");
+  }
 
-    // 폴더 없으면 자동 생성
-    if (!fs.existsSync(destFolder)) fs.mkdirSync(destFolder);
+  const safeFilename = String(filename);
+  const sourcePath = path.join(UNCLASSIFIED_DIR, safeFilename);
+  const targetDir = path.join(CLASSIFIED_DIR, category);
 
-    const dest = path.join(destFolder, filename);
+  if (!fs.existsSync(sourcePath)) {
+    return res.status(404).send("Original file not found");
+  }
 
-    fs.rename(src, dest, (err) => {
-        if (err) return res.status(500).json({ error: "이동 실패" });
-        res.json({ message: "이동 완료" });
-    });
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  const destPath = path.join(targetDir, safeFilename);
+
+  fs.rename(sourcePath, destPath, (err) => {
+    if (err) return res.status(500).send("Error moving file");
+    res.send("File moved");
+  });
 });
 
+// 서버 실행
 const PORT = process.env.PORT || 3000;
-
-app.listen(3000, () => {
-    console.log("📡 Server running at http://localhost:3000");
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
